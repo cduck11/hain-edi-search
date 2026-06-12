@@ -12,7 +12,8 @@ header{padding:16px 28px;border-bottom:1px solid var(--bor);display:flex;align-i
 .logo{font-size:12px;font-weight:700;letter-spacing:.1em;color:var(--mu);text-transform:uppercase}.logo span{color:var(--acc)}
 .htitle{font-size:15px;font-weight:600}
 .badge{margin-left:auto;background:var(--sur2);border:1px solid var(--bor);border-radius:6px;padding:4px 10px;font-size:11px;color:var(--mu);font-family:var(--mono)}
-.loading-bar{height:3px;background:linear-gradient(90deg,var(--acc),#8b5cf6);position:fixed;top:0;left:0;z-index:999;transition:width .3s}
+.pbar-wrap{position:fixed;top:0;left:0;right:0;z-index:999;height:3px;background:var(--sur2)}
+.pbar{height:3px;background:linear-gradient(90deg,var(--acc),#8b5cf6);width:0;transition:width .2s}
 .layout{display:grid;grid-template-columns:248px 1fr;min-height:calc(100vh - 57px)}
 .sidebar{border-right:1px solid var(--bor);padding:18px 14px;overflow-y:auto;height:calc(100vh - 57px);position:sticky;top:57px}
 .slabel{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin-bottom:8px;padding:0 8px}
@@ -50,7 +51,7 @@ tbody tr:hover td{background:var(--sur2);cursor:pointer}
 .state .ico{font-size:32px;margin-bottom:12px}
 .spin{display:inline-block;width:16px;height:16px;border:2px solid var(--bor);border-top-color:var(--acc);border-radius:50%;animation:spin .6s linear infinite;vertical-align:middle;margin-right:6px}
 @keyframes spin{to{transform:rotate(360deg)}}
-.pg{display:flex;align-items:center;gap:6px;margin-top:16px;justify-content:center}
+.pg{display:flex;align-items:center;gap:6px;margin-top:16px;justify-content:center;flex-wrap:wrap}
 .pb{padding:5px 11px;border-radius:6px;border:1px solid var(--bor);background:var(--sur);color:var(--mu);cursor:pointer;font-size:13px;transition:all .15s}
 .pb:hover:not(:disabled){border-color:var(--acc);color:var(--acc)}
 .pb:disabled{opacity:.3;cursor:not-allowed}
@@ -81,7 +82,7 @@ tbody tr:hover td{background:var(--sur2);cursor:pointer}
 </style>
 </head>
 <body>
-<div class="loading-bar" id="lb" style="width:0"></div>
+<div class="pbar-wrap"><div class="pbar" id="pb"></div></div>
 <header>
   <div class="logo">HAIN <span>PARTNERS</span></div>
   <div class="htitle">EDI 수가코드 검색</div>
@@ -109,10 +110,12 @@ tbody tr:hover td{background:var(--sur2);cursor:pointer}
     </div>
   </aside>
   <main class="main">
-    <div class="sw"><span class="si">🔍</span><input type="text" id="q" placeholder="수가코드, 행위명, 분류번호..."></div>
-    <div class="hint">예: <kbd>HE115</kbd> | <kbd>자기공명</kbd> | <kbd>다246가</kbd> | <kbd>MRI</kbd></div>
+    <div class="sw"><span class="si">🔍</span>
+      <input type="text" id="q" placeholder="수가코드, 행위명, 분류번호... (로딩 완료 후 검색 가능)">
+    </div>
+    <div class="hint">예: <kbd>HE115</kbd> | <kbd>자기공명</kbd> | <kbd>다246가</kbd> | <kbd>MRI</kbd> | <kbd>D1702000Z</kbd></div>
     <div class="stats"><span class="snum" id="cnt">—</span><span>건 검색됨</span></div>
-    <div id="body"><div class="state"><div class="ico">⌨️</div><p>검색어를 입력하거나 좌측 필터를 선택하세요</p></div></div>
+    <div id="body"><div class="state"><div class="ico">⏳</div><p id="loadmsg">데이터 로딩 중... (0/50)</p></div></div>
     <div class="pg" id="pg"></div>
   </main>
 </div>
@@ -120,27 +123,43 @@ tbody tr:hover td{background:var(--sur2);cursor:pointer}
   <div class="mod" id="mc"></div>
 </div>
 <script>
-const DATA_URL = 'https://raw.githubusercontent.com/cduck11/hain-edi-search/main/data.json';
-let DB=[], filtered=[], state={q:'',p:'',m:'',cat:'',page:1}, LIMIT=30, loaded=false;
+const BASE = 'https://raw.githubusercontent.com/cduck11/hain-edi-search/main';
+const CHUNKS = 50;
+const LIMIT = 30;
+let DB=[], filtered=[], state={q:'',p:'',m:'',cat:'',page:1}, loaded=false;
 
-// 로딩
-(async()=>{
-  const lb=document.getElementById('lb');
-  lb.style.width='30%';
-  try{
-    const r=await fetch(DATA_URL);
-    lb.style.width='70%';
-    DB=await r.json();
-    lb.style.width='100%';
-    setTimeout(()=>lb.style.width='0',400);
-    loaded=true;
-    document.getElementById('badge').textContent=DB.length.toLocaleString()+' 건 수록';
-    buildCats();
-  }catch(e){
-    lb.style.background='var(--red)';lb.style.width='100%';
-    document.getElementById('body').innerHTML='<div class="state"><div class="ico">⚠️</div><p>데이터 로드 실패: '+e.message+'</p></div>';
-  }
-})();
+async function loadAll(){
+  const pb=document.getElementById('pb');
+  const msg=document.getElementById('loadmsg');
+  
+  // 병렬로 50개 청크 fetch
+  const promises = Array.from({length:CHUNKS},(_,i)=>
+    fetch(`${BASE}/chunks/d${String(i).padStart(2,'0')}.json`)
+      .then(r=>r.json())
+      .then(data=>{
+        DB.push(...data);
+        const pct=Math.round((DB.length/398539)*100);
+        pb.style.width=pct+'%';
+        msg.textContent=`데이터 로딩 중... ${DB.length.toLocaleString()} / 398,539`;
+      })
+  );
+  
+  await Promise.all(promises);
+  
+  pb.style.width='100%';
+  pb.style.background='var(--green)';
+  setTimeout(()=>{pb.style.width='0';pb.style.background='';},600);
+  
+  loaded=true;
+  document.getElementById('badge').textContent=DB.length.toLocaleString()+' 건 수록';
+  document.getElementById('q').placeholder='수가코드, 행위명, 분류번호로 검색...';
+  document.getElementById('body').innerHTML='<div class="state"><div class="ico">⌨️</div><p>'+DB.length.toLocaleString()+'건 로드 완료 — 검색어를 입력하거나 필터를 선택하세요</p></div>';
+  buildCats();
+}
+
+loadAll().catch(e=>{
+  document.getElementById('body').innerHTML='<div class="state"><div class="ico">⚠️</div><p>로드 실패: '+e.message+'</p></div>';
+});
 
 function buildCats(){
   const map={};
@@ -159,7 +178,8 @@ function buildCats(){
 
 let dt;
 document.getElementById('q').addEventListener('input',e=>{
-  clearTimeout(dt);dt=setTimeout(()=>{state.q=e.target.value.trim();state.page=1;search();},280);
+  clearTimeout(dt);
+  dt=setTimeout(()=>{state.q=e.target.value.trim();state.page=1;search();},300);
 });
 
 function sf(key,val){
@@ -167,17 +187,15 @@ function sf(key,val){
   document.querySelectorAll('.fbtn').forEach(b=>{
     const oc=b.getAttribute('onclick')||'';
     const dc=b.dataset.cat||'';
-    if(oc.includes("'"+key+"'")||key==='cat'&&dc){
-      const match=(oc.includes("'"+val+"'")||val===''&&oc.endsWith(",'')"))
-                  ||(key==='cat'&&dc===val);
-      b.classList.toggle('active',match);
-    }
+    const match=(oc.includes("'"+key+"'")&&(oc.includes("'"+val+"'")||(val===''&&oc.endsWith(",''"))))
+               ||(key==='cat'&&dc===val);
+    if(oc.includes("'"+key+"'")||key==='cat'&&dc) b.classList.toggle('active',match);
   });
   search();
 }
 
 function search(){
-  if(!loaded){document.getElementById('body').innerHTML='<div class="state"><span class="spin"></span> 데이터 로딩 중...</div>';return;}
+  if(!loaded){return;}
   const {q,p,m,cat,page}=state;
   if(!q&&!p&&!m&&!cat){
     document.getElementById('body').innerHTML='<div class="state"><div class="ico">⌨️</div><p>검색어를 입력하거나 좌측 필터를 선택하세요</p></div>';
@@ -189,7 +207,10 @@ function search(){
     if(p&&r.p!==p)return false;
     if(m&&r.m!==m)return false;
     if(cat&&r['2']!==cat)return false;
-    if(q){const s=((r.e||'')+(r.k||'')+(r.c||'')+(r.n||'')).toLowerCase();if(!s.includes(ql))return false;}
+    if(q){
+      const s=((r.e||'')+(r.k||'')+(r.s||'')+(r.c||'')+(r.n||'')).toLowerCase();
+      if(!s.includes(ql))return false;
+    }
     return true;
   });
   document.getElementById('cnt').textContent=filtered.length.toLocaleString();
@@ -204,11 +225,15 @@ function renderTable(rows){
     <thead><tr><th>수가코드</th><th>분류번호</th><th>행위명</th><th>급여</th><th>구분</th><th style="text-align:right">의원</th><th style="text-align:right">병원</th><th style="text-align:right">RVU</th></tr></thead>
     <tbody>${rows.map(r=>{
       const c1=fmt(r.u),c2=fmt(r.h);
-      return `<tr onclick="od(${JSON.stringify(JSON.stringify(r))})">
-        <td><span class="ec">${r.e||''}</span></td>
+      const nm=r.k||(r.s?'↳ '+r.s:'');
+      const isChild=r.i==='Y';
+      return `<tr onclick="od(${JSON.stringify(JSON.stringify(r))})" style="${isChild?'opacity:.85':''}">
+        <td><span class="ec" style="${isChild?'font-size:11px':''}">
+          ${isChild?'&nbsp;&nbsp;↳ ':''}<span style="${isChild?'color:var(--mu)':''}">${r.e||''}</span>
+        </span></td>
         <td><span class="cn">${r.c||''}</span></td>
-        <td><span class="kn" title="${(r.k||'').replace(/"/g,'&quot;')}">${r.k||''}</span></td>
-        <td><span class="tag tag-${r.p||''}">${r.p||''}</span></td>
+        <td><span class="kn" title="${(nm).replace(/"/g,'&quot;')}">${nm}</span></td>
+        <td>${isChild?'':' <span class="tag tag-'+(r.p||'')+'">'+(r.p||'')+'</span>'}</td>
         <td style="color:var(--mu);font-size:11px">${r.m||''}</td>
         <td class="cost ${c1?'':'z'}">${c1||'—'}</td>
         <td class="cost ${c2?'':'z'}">${c2||'—'}</td>
@@ -229,18 +254,18 @@ function renderPg(total,cur){
   h+=`<span class="pi">${cur}/${pages}p (${total.toLocaleString()}건)</span>`;
   document.getElementById('pg').innerHTML=h;
 }
-function gp(p){state.page=p;search();}
+function gp(p){state.page=p;search();window.scrollTo(0,200);}
 
 function od(rs){
   const r=JSON.parse(rs);
   document.getElementById('ov').classList.add('open');
   const bc=[r['1'],r['2'],r['3']].filter(Boolean);
-  const ch=r.x||[];
   document.getElementById('mc').innerHTML=`
     <button class="mc" onclick="cm()">✕</button>
     <div class="mec">${r.e||''}</div>
-    <div class="mkn">${r.k||'—'}</div>
+    <div class="mkn">${r.k||r.s||'—'}</div>
     ${r.n?`<div style="font-size:13px;color:var(--mu);margin-bottom:12px">${r.n}</div>`:''}
+    ${r.s&&r.k?`<div style="font-size:12px;color:var(--dim);margin-bottom:12px">산정명: ${r.s}</div>`:''}
     <div class="bc">${bc.map((b,i)=>`<span class="bci">${b}</span>${i<bc.length-1?'<span class="bcs">›</span>':''}`).join('')}</div>
     <div class="stl">기본 정보</div>
     <div class="ig">
@@ -256,9 +281,7 @@ function od(rs){
       <div class="ci"><div class="cl">치과병원</div><div class="cv ${!r.t?'z':''}">${r.t?Number(r.t).toLocaleString():'—'}</div></div>
       <div class="ci"><div class="cl">한방/요양</div><div class="cv ${!r.o?'z':''}">${r.o?Number(r.o).toLocaleString():'—'}</div></div>
     </div>
-    ${ch.length?`<div class="stl">하위 코드 (${ch.length}개)</div>
-    <table class="cht"><thead><tr><th>코드</th><th>산정명</th><th style=text-align:right>의원</th><th style=text-align:right>병원</th></tr></thead>
-    <tbody>${ch.map(c=>`<tr><td style="font-family:var(--mono);color:var(--acc);font-size:11px">${c.e||''}</td><td style="font-size:11px;color:var(--mu)">${c.s||''}</td><td style="font-family:var(--mono);font-size:11px;text-align:right">${c.c?Number(c.c).toLocaleString():'—'}</td><td style="font-family:var(--mono);font-size:11px;text-align:right">${c.h?Number(c.h).toLocaleString():'—'}</td></tr>`).join('')}</tbody></table>`:''}
+    ${r.pe?`<div style="font-size:12px;color:var(--mu);margin-top:8px">부모코드: <span style="font-family:var(--mono);color:var(--acc)">${r.pe}</span></div>`:''}
   `;
 }
 function cm(){document.getElementById('ov').classList.remove('open');}
